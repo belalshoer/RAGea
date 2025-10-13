@@ -25,5 +25,5 @@ class VectorStore(ABC):
         """Returns number of chunks added."""
 
     @abstractmethod
-    def as_retriever(self, k: int = 5)  -> BaseRetriever:
+    def retrieve(self, img_path: str, k: int = None) -> List[Document]:
         """Return a retriever bound to this store."""
