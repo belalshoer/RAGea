@@ -4,21 +4,23 @@ from typing import List, Optional
 import faiss
 from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
+from features import Siglip2FeatureExtractor 
 from .base import VectorStore
 
 @dataclass
 class VectorStoreCfg:
     k: int = 4
     base_dir: Path = Path("./vector_stores")
+    embedding = Siglip2FeatureExtractor()
     allow_dangerous_deserialization: bool = True
 
 class FaissVectorStore(VectorStore):
-    def __init__(self, name: str, embedding, cfg: VectorStoreCfg = VectorStoreCfg()):
+    def __init__(self, name: str, cfg: VectorStoreCfg = VectorStoreCfg()):
         self.name = name
         self.cfg = cfg
         self.dir = cfg.base_dir / name
         self.k = cfg.k
-        self.embedding = embedding
+        self.embedding = cfg.embedding
         self.vs: Optional[FAISS] = None
         self._loaded: bool = False
 
