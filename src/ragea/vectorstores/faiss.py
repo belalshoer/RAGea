@@ -13,12 +13,12 @@ class VectorStoreCfg:
     allow_dangerous_deserialization: bool = True
 
 class FaissVectorStore(VectorStore):
-    def __init__(self, name: str, embeddings, cfg: VectorStoreCfg = VectorStoreCfg()):
+    def __init__(self, name: str, embedding, cfg: VectorStoreCfg = VectorStoreCfg()):
         self.name = name
         self.cfg = cfg
         self.dir = cfg.base_dir / name
         self.k = cfg.k
-        self.embeddings = embeddings
+        self.embedding = embedding
         self.vs: Optional[FAISS] = None
         self._loaded: bool = False
 
@@ -29,9 +29,9 @@ class FaissVectorStore(VectorStore):
         if self.exists():
             raise FileExistsError(f"Vector store '{self.name}' already exists at {self.dir}")
         
-        dim = len(self.embeddings.embed_query("test"))
+        dim = len(self.embedding.embed_query("test"))
         index = faiss.IndexFlatL2(dim)
-        self.vs = FAISS.from_documents(chunks, self.embeddings, index=index)
+        self.vs = FAISS.from_documents(chunks, self.embedding)
         self.loaded = True
         self._save()
 
@@ -43,7 +43,7 @@ class FaissVectorStore(VectorStore):
         
         self.vs = FAISS.load_local(
             str(self.dir),
-            self.embeddings,
+            self.embedding,
             allow_dangerous_deserialization=self.cfg.allow_dangerous_deserialization,
         )
 
@@ -59,6 +59,6 @@ class FaissVectorStore(VectorStore):
 
     def retrieve(self, img_path: str, k: int = None) -> List[Document]:
         self._load()
-        embeddings = self.embedding.embed_image([img_path])
-        return self.vs.similarity_search_by_vector(embeddings[0], k = (k if k else self.k))
+        embedding = self.embedding.encode_image([img_path])
+        return self.vs.similarity_search_by_vector(embedding[0], k = (k if k else self.k))
     
