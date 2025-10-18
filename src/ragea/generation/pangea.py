@@ -27,6 +27,7 @@ def _load_rgb(img_or_path: Union[str, Image.Image]) -> Image.Image:
 
 @dataclass
 class Captioner:
+    
     model: LlavaNextForConditionalGeneration
     processor: AutoProcessor
     device: str
@@ -61,9 +62,9 @@ class Captioner:
         # Keep embeddings in sync with the processor's tokenizer if needed
         if model.get_input_embeddings().weight.shape[0] != len(processor.tokenizer):
             model.resize_token_embeddings(len(processor.tokenizer))
-
-        # If you used device_map="auto", .to(device) is usually fine; remove if it conflicts in your environment.
-        model.to(device)
+      
+        if  getattr(model, "hf_device_map", None) in (None, {}, "none"):
+            model.to(device)
         return Captioner(model=model, processor=processor, device=device)
 
     def _build_prompt(
