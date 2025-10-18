@@ -6,6 +6,7 @@ from rouge_score import rouge_scorer
 from bert_score import score as bert_score
 from sacrebleu.metrics import CHRF
 
+
 # Languages where char-level tokenization is safer
 CJK_LIKE = {"zh", "ja", "ko", "th"}
 
@@ -85,12 +86,30 @@ def evaluate_captions(
 
 # ------------------ Example ------------------ #
 if __name__ == "__main__":
-    refs = [
-        "Un hombre monta un caballo en el campo.",
-        "Un plato de comida con verduras."
-    ]
-    hyps = [
-        "Un hombre está montando un caballo en el campo.",
-        "Un plato con arroz y verduras."
-    ]
-    print(evaluate_captions(refs, hyps, lang="es"))
+    from argparse import ArgumentParser
+    import pandas as pd
+    parser =ArgumentParser()
+    parser.add_argument("csv_file")
+
+
+    results=pd.read_csv("results.csv")
+    langs= results.lang.unique()
+    LANG_NAME = {
+    "ar":"Arabic","bn":"Bengali","cs":"Czech","da":"Danish","de":"German","el":"Greek",
+    "en":"English","es":"Spanish","fa":"Persian","fi":"Finnish","fil":"Filipino",
+    "fr":"French","hi":"Hindi","hr":"Croatian","hu":"Hungarian","id":"Indonesian",
+    "it":"Italian","he":"Hebrew","ja":"Japanese","ko":"Korean","mi":"Māori","nl":"Dutch",
+    "no":"Norwegian","pl":"Polish","pt":"Portuguese","quz":"Quechua","ro":"Romanian",
+    "ru":"Russian","sv":"Swedish","sw":"Swahili","te":"Telugu","th":"Thai","tr":"Turkish",
+    "uk":"Ukrainian","vi":"Vietnamese","zh":"Chinese"
+}
+    
+    for lang in langs:
+        
+        refs=results[results["lang"]==lang].reference.tolist()
+        hyps=results[results["lang"]==lang].prediction.tolist()
+        metrics=evaluate_captions(refs, hyps, lang=lang)
+        line=LANG_NAME[lang]+str(metrics)
+        with open("results.txt", "a", encoding="utf-8") as f:
+            f.write(line + "\n")   
+
