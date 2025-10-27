@@ -6,8 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
-outputs
-vector_stores
+src/ragea/outputs/
+src/ragea/vector_stores/
 
 # Distribution / packaging
 .Python
