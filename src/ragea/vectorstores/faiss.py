@@ -8,6 +8,7 @@ from features import Siglip2FeatureExtractor
 from .base import VectorStore
 from utils import get_similar_captions
 from PIL.Image import Image
+import tqdm
 
 @dataclass
 class VectorStoreCfg:
@@ -36,17 +37,17 @@ class FaissVectorStore(VectorStore):
             raise FileExistsError(f"Vector store '{self.name}' already exists at {self.dir}")
         
         dim = len(self.embedding.embed_query("test"))
+        
         index = faiss.IndexFlatL2(dim)
-        self.vs = FAISS.from_documents([chunks[0]], self.embedding)
+        self.vs = FAISS(
+            embedding_function=self.embedding,
+            index=index,
+        )
 
         self.loaded = True
-        self._save()
 
-        for i in range(1, len(chunks), self.bs):
-            self.add_documents(chunks[i: i+self.bs])
-            print(F"New batch from {i} to {i+self.bs-1} - Batch number {(i // self.bs) + 1}")
-
-       
+        for i in tqdm.tqdm(range(0, len(chunks), self.bs)):
+            self.add_documents(chunks[i: i+self.bs]) 
 
     def _load(self) -> None:
         if self._loaded:
@@ -64,7 +65,10 @@ class FaissVectorStore(VectorStore):
 
     def add_documents(self, chunks: List[Document]) -> int:
         self._load()
-        self.vs.add_documents(chunks)
+
+        for i in tqdm.tqdm(range(0, len(chunks), self.bs)):
+            self.add_documents(chunks[i: i+self.bs]) 
+
         self._save()
       
     def _save(self) -> None:

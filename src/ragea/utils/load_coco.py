@@ -1,12 +1,13 @@
 import json
+import tqdm
 
 def load_coco(input_path: str, output_path:str = None):
-    print(f"load {output_path}")
+    print(f"loading data in  {input_path}")
 
     items = {}
     
     with open(input_path, encoding = "UTF-8") as f:
-        for line in f:
+        for line in tqdm.tqdm(f.readlines()):
             line = line.strip()
             if not line:
                 continue
@@ -24,5 +25,4 @@ def load_coco(input_path: str, output_path:str = None):
     
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=2) 
-            
-# load_coco("/home/belal.shoer/Desktop/RAGea/COCO-35L/merged.jsonl", "/home/belal.shoer/Desktop/RAGea/src/ragea/outputs/captions_35L.json")                        
+                    
