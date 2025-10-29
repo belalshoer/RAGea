@@ -1,8 +1,10 @@
 from langchain_core.documents import Document
+from typing import List
 import json
 import tqdm
+from pathlib import Path
 
-def prepare_documents(input_path, source):
+def prepare_documents(input_path: Path, source: str) -> List[Document]:
     print(f"Preparing documents for Vector Store")
     docs = []
 

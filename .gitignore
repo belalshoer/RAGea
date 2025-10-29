@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
+stores
+
 src/ragea/outputs/
 src/ragea/vector_stores/
 *.json

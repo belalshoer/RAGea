@@ -1,16 +1,17 @@
 from pipelines import build_add_index
-from vectorstores import FaissVectorStore
-from PIL import Image
+from argparse import ArgumentParser
+import sys
+
+def main():
+    parser = ArgumentParser(description="Build or add to a FAISS index from COCO data.")
+    parser.add_argument("name", type=str, help="Name of the vector store.")
+    parser.add_argument("mode", type=str, choices=["build", "add"], help="Mode: build a new index or add to an existing one.")
+    parser.add_argument("input_path", type=str, help="Path to the input COCO data.")
+    parser.add_argument("--output_path", type=str, default=None, help="Path to save the processed data (optional).")
+
+    args = parser.parse_args()
+    build_add_index(args.name, args.mode, args.input_path, args.output_path)
 
 
-# build_add_index_sharded(
-#     name="english_coco_index",
-#     input_path="/home/belal.shoer/Desktop/RAGea/COCO-35L/english_only.jsonl",
-#     parts=64,
-#     overwrite=True,   
-# )
-# build_add_index("english_coco_index3", "build", "/home/belal.shoer/Desktop/RAGea/COCO-35L/english_only.jsonl")
-
-vs = FaissVectorStore("english_coco_index3")
-img = Image.open("/home/belal.shoer/Desktop/VtoL/nanoVLM/chihuahua-puppy-grass-squeaky-bone-toy-58273.webp")
-print(vs.retrieve(img))
+if __name__ == "__main__":
+    main()

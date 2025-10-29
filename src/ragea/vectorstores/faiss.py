@@ -4,6 +4,7 @@ from typing import List, Optional
 import faiss
 from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
+from langchain_community.docstore.in_memory import InMemoryDocstore
 from features import Siglip2FeatureExtractor 
 from .base import VectorStore
 from utils import get_similar_captions
@@ -14,7 +15,7 @@ import tqdm
 class VectorStoreCfg:
     k: int = 4
     bs: int = 5000
-    base_dir: Path = Path("./vector_stores")
+    base_dir: Path = Path("./stores")
     embedding = Siglip2FeatureExtractor()
     allow_dangerous_deserialization: bool = True
 
@@ -42,12 +43,14 @@ class FaissVectorStore(VectorStore):
         self.vs = FAISS(
             embedding_function=self.embedding,
             index=index,
+            docstore=InMemoryDocstore(),
+            index_to_docstore_id={},
         )
 
         self.loaded = True
-
-        for i in tqdm.tqdm(range(0, len(chunks), self.bs)):
-            self.add_documents(chunks[i: i+self.bs]) 
+        self._save()
+    
+        return self.add_documents(chunks) 
 
     def _load(self) -> None:
         if self._loaded:
@@ -67,9 +70,11 @@ class FaissVectorStore(VectorStore):
         self._load()
 
         for i in tqdm.tqdm(range(0, len(chunks), self.bs)):
-            self.add_documents(chunks[i: i+self.bs]) 
+            self.vs.add_documents(chunks[i: i+self.bs]) 
 
         self._save()
+
+        return self.vs.index.ntotal
       
     def _save(self) -> None:
         self.vs.save_local(str(self.dir))
@@ -79,6 +84,6 @@ class FaissVectorStore(VectorStore):
         embedding = self.embedding.encode_image([img])
         docs = self.vs.similarity_search_by_vector(embedding[0], k = (k if k else self.k))
         img_ids = [d.metadata.get("img_id") for d in docs]
-        captions = get_similar_captions(img_ids, lang)
+        captions = get_similar_captions(self.name, img_ids, lang)
         return captions 
 

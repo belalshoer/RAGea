@@ -27,3 +27,5 @@ class VectorStore(ABC):
     @abstractmethod
     def retrieve(self, img_path: str, k: int = None) -> List[Document]:
         """Return a retriever bound to this store."""
+
+    
