@@ -10,11 +10,13 @@ from tqdm.auto import tqdm
 class FeatureExtractorCfg:
     model_name = "google/siglip2-giant-opt-patch16-384"
     use_fast = True
+    dtype = torch.float16
 
 class Siglip2FeatureExtractor(Embeddings):
     def __init__(self,  cfg: FeatureExtractorCfg = FeatureExtractorCfg()):
         self.model_name = cfg.model_name
         self.use_fast = cfg.use_fast
+        self.dtype = cfg.dtype
 
         self.processor = AutoProcessor.from_pretrained(
             self.model_name, 
@@ -22,7 +24,7 @@ class Siglip2FeatureExtractor(Embeddings):
         )
         self.model = AutoModel.from_pretrained(
             self.model_name,
-            dtype=torch.float16,
+            dtype=self.dtype,
         )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)

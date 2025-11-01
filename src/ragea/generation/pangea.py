@@ -1,13 +1,9 @@
-from __future__ import annotations
 from typing import Optional, Tuple, Union, Sequence, List
 from dataclasses import dataclass
 from PIL import Image
 import torch
 from transformers import LlavaNextForConditionalGeneration, AutoProcessor
-
-DEFAULT_SYSTEM_PROMPT = "You are a helpful image captioning model."
-DEFAULT_USER_PROMPT = "Caption the image in one concise sentence."
-
+from generation.prompt import DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT
 
 def ensure_llava_patch_size(processor, model, default: int = 14) -> int:
     patch: Optional[int] = getattr(getattr(processor, "image_processor", None), "patch_size", None)
@@ -26,77 +22,75 @@ def _load_rgb(img_or_path: Union[str, Image.Image]) -> Image.Image:
 
 
 @dataclass
+class CaptionerCfg:
+    model_name = "neulab/Pangea-7B-hf"
+    use_fast = True
+    dtype = torch.float16
+
+
 class Captioner:
-    
-    model: LlavaNextForConditionalGeneration
-    processor: AutoProcessor
-    device: str
 
-    @staticmethod
-    def load(
-        model_id: str = "neulab/Pangea-7B-hf",
-        device: Optional[str] = None,
-        dtype: Optional[torch.dtype] = None,
-    ) -> "Captioner":
-        """
-        Load model & processor once, then reuse the Captioner object across files.
-        """
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        if dtype is None:
-            dtype = torch.float16 if device == "cuda" else torch.float32
+    def __init__(self, cfg: CaptionerCfg = CaptionerCfg()):
+        self.model_name = cfg.model_name
+        self.dtype = cfg.dtype
+        self.use_fast = cfg.use_fast
 
-        model = LlavaNextForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype=dtype,            # respect dtype
-            device_map="auto",
-            trust_remote_code=True,
+
+        self.model = LlavaNextForConditionalGeneration.from_pretrained(
+            self.model_name,
+            dtype=self.dtype,            
         )
-        processor = AutoProcessor.from_pretrained(
-            model_id,
-            trust_remote_code=True,
-            use_fast=True
+
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name,
+            use_fast = self.use_fast
         )
-        ps = ensure_llava_patch_size(processor, model)
+
+        self.model.resize_token_embeddings(len(self.processor.tokenizer))
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+
+        
+        ps = ensure_llava_patch_size(self.processor, self.model)
         print(f"[info] Using patch_size={ps}")
-
-        # Keep embeddings in sync with the processor's tokenizer if needed
-        if model.get_input_embeddings().weight.shape[0] != len(processor.tokenizer):
-            model.resize_token_embeddings(len(processor.tokenizer))
-      
-        if  getattr(model, "hf_device_map", None) in (None, {}, "none"):
-            model.to(device)
-        return Captioner(model=model, processor=processor, device=device)
 
     def _build_prompt(
         self,
-        user_prompt: str,
+        user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     ) -> str:
-        # Text template with <image> token expected by many LLaVA-style processors
+        """
+        Build the text template with <image> token expected by many LLaVA-style processors.
+        """
+        
         return (
             f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
             f"<|im_start|>user\n<image>\n{user_prompt}<|im_end|>\n"
             f"<|im_start|>assistant\n"
         )
 
-    def caption(
+    def caption_image(
         self,
         image: Union[str, Image.Image],
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
-        temperature: float = 0.2,
-        top_p: float = 0.9,
-        do_sample: Optional[bool] = None,
+        temperature: float = 0.1,
+        top_p: float = 0.5,
+        do_sample: bool = True,
+        **gen_kwargs
+
     ) -> str:
         """
-        Single image captioning; unchanged public API.
+        Single image captioning.
         """
+
         img = _load_rgb(image)
         text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt)
 
-        # Default sampling behavior: sample iff temperature > 0
+
         if do_sample is None:
             do_sample = temperature is not None and temperature > 0
 
@@ -115,6 +109,7 @@ class Captioner:
                 top_p=top_p,
                 do_sample=do_sample,
                 use_cache=True,
+                **gen_kwargs
             )
 
         full_text = self.processor.tokenizer.decode(
@@ -129,17 +124,18 @@ class Captioner:
         caption = full_text.splitlines()[-1].strip() if "\n" in full_text else full_text
         return caption
 
-    def caption_many(
+    def caption_images(
         self,
         images: Sequence[Union[str, Image.Image]],
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
-        temperature: float = 0.2,
-        top_p: float = 0.9,
-        do_sample: Optional[bool] = None,
-        batch_size: Optional[int] = None,
+        temperature: float = 0.1,
+        top_p: float = 0.5,
+        do_sample: bool = True,
+        batch_size: Optional[int] = 32,
+        **gen_kwargs
     ) -> List[str]:
         """
         Batched captioning. Accepts a sequence of image paths or PIL Images.
@@ -165,6 +161,7 @@ class Captioner:
             for chunk in _chunks(pil_images, batch_size):
                 # Repeat the same prompt for each image in the chunk
                 texts = [text] * len(chunk)
+
                 inputs = self.processor(
                     images=chunk,
                     text=texts,
@@ -180,6 +177,7 @@ class Captioner:
                     top_p=top_p,
                     do_sample=do_sample,
                     use_cache=True,
+                    **gen_kwargs
                 )
 
                 decoded = self.processor.tokenizer.batch_decode(
@@ -197,63 +195,3 @@ class Captioner:
                     results.append(s)
 
         return results
-
-
-# Convenience top-level functions for quick use in other files
-def load_captioner(
-    model_id: str = "neulab/Pangea-7B-hf",
-    device: Optional[str] = None,
-    dtype: Optional[torch.dtype] = None,
-) -> Captioner:
-    return Captioner.load(model_id=model_id, device=device, dtype=dtype)
-
-
-def caption_image(
-    image_path: Union[str, Image.Image],
-    user_prompt: str = DEFAULT_USER_PROMPT,
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    model_id: Optional[str] = None,
-    captioner: Optional[Captioner] = None,
-    **gen_kwargs,
-) -> str:
-    cap = captioner or Captioner.load(model_id or "neulab/Pangea-7B-hf")
-    return cap.caption(
-        image=image_path,
-        user_prompt=user_prompt,
-        system_prompt=system_prompt,
-        **gen_kwargs,
-    )
-
-
-def caption_images(
-    image_paths: Sequence[Union[str, Image.Image]],
-    user_prompt: str = DEFAULT_USER_PROMPT,
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    model_id: Optional[str] = None,
-    captioner: Optional[Captioner] = None,
-    batch_size: Optional[int] = None,
-    **gen_kwargs,
-) -> List[str]:
-    """
-    New helper: batch caption multiple images. Returns list of captions.
-    """
-    cap = captioner or Captioner.load(model_id or "neulab/Pangea-7B-hf")
-    return cap.caption_many(
-        images=image_paths,
-        user_prompt=user_prompt,
-        system_prompt=system_prompt,
-        batch_size=batch_size,
-        **gen_kwargs,
-    )
-
-
-if __name__ == "__main__":
-    # Single
-    path = "example.png"
-    print(path, caption_image(image_path=path))
-
-    # Batch
-    paths = ["example.png", "example2.jpg", "example3.jpeg"]
-    caps = caption_images(paths, batch_size=2)
-    for p, c in zip(paths, caps):
-        print(p, c)
