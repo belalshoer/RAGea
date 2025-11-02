@@ -4,6 +4,7 @@ from PIL import Image
 import torch
 from transformers import LlavaNextForConditionalGeneration, AutoProcessor
 from generation.prompt import DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT
+import tqdm
 
 def ensure_llava_patch_size(processor, model, default: int = 14) -> int:
     patch: Optional[int] = getattr(getattr(processor, "image_processor", None), "patch_size", None)
@@ -54,6 +55,7 @@ class Captioner:
         
         ps = ensure_llava_patch_size(self.processor, self.model)
         print(f"[info] Using patch_size={ps}")
+        print(f"pad token id: { self.processor.tokenizer.eos_token_id}")
 
     def _build_prompt(
         self,
@@ -78,8 +80,8 @@ class Captioner:
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
         temperature: float = 0.1,
-        top_p: float = 0.5,
-        do_sample: bool = True,
+        top_p: float = 0.9,
+        do_sample: bool = None,
         **gen_kwargs
 
     ) -> str:
@@ -131,10 +133,10 @@ class Captioner:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
-        temperature: float = 0.1,
+        temperature: float = 0,
         top_p: float = 0.5,
-        do_sample: bool = True,
-        batch_size: Optional[int] = 32,
+        do_sample: bool = False,
+        batch_size: Optional[int] = 16,
         **gen_kwargs
     ) -> List[str]:
         """
@@ -142,6 +144,8 @@ class Captioner:
         Set `batch_size` to process large sets in chunks (avoids OOM).
         Returns a list of captions in the same order as `images`.
         """
+        print("here")
+        print( self.processor.tokenizer.eos_token_id)
         if do_sample is None:
             do_sample = temperature is not None and temperature > 0
 
@@ -149,7 +153,7 @@ class Captioner:
         pil_images = [_load_rgb(x) for x in images]
         text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt)
 
-        def _chunks(seq, n):
+        def _chunks(seq, n = None):
             if n is None or n <= 0:
                 yield seq
             else:
@@ -158,7 +162,7 @@ class Captioner:
 
         results: List[str] = []
         with torch.inference_mode():
-            for chunk in _chunks(pil_images, batch_size):
+            for chunk in tqdm.tqdm(_chunks(pil_images, batch_size)):
                 # Repeat the same prompt for each image in the chunk
                 texts = [text] * len(chunk)
 
@@ -166,7 +170,8 @@ class Captioner:
                     images=chunk,
                     text=texts,
                     return_tensors="pt",
-                    padding=True
+                    padding=True,
+
                 ).to(self.device)
 
                 output_ids = self.model.generate(
@@ -176,7 +181,9 @@ class Captioner:
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=do_sample,
+                    pad_token_id= self.processor.tokenizer.eos_token_id,
                     use_cache=True,
+        
                     **gen_kwargs
                 )
 
