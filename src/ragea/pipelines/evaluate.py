@@ -2,9 +2,14 @@ import argparse
 from typing import Any, Dict, List, Optional
 from datasets import load_dataset
 import pandas as pd
+import time
+from tqdm.auto import tqdm
 
-from ragea.generation.pangea import caption_images, caption_image
-from ragea.pipelines.metrics import evaluate_captions  # uses BLEU@4, ROUGE-L, ChrF++, BERTScore
+from vectorstores import FaissVectorStore
+from generation.pangea import caption_images, caption_image, Captioner
+from pipelines.metrics import evaluate_captions  # uses BLEU@4, ROUGE-L, ChrF++, BERTScore
+
+captioner = Captioner.load("neulab/Pangea-7B-hf")
 
 LANG_SPLITS = [
     "ar","bn","cs","da","de","el","en","es","fa","fi","fil","fr","hi","hr","hu",
@@ -22,18 +27,49 @@ LANG_NAME = {
     "uk":"Ukrainian","vi":"Vietnamese","zh":"Chinese"
 }
 
-def caption_backend_pangea(images: List[Any], user_prompt: str) -> List[str]:
-    """Use ragea.generation.pangea; prefer true batched path if available, fallback to sequential on runtime errors."""
-    
-    try:
-        return caption_images(image_paths=images, batch_size=4, user_prompt=user_prompt)
-    except Exception:
-        # Fallback: sequential (keep try/except here for robustness at runtime; imports at top are clean)
-        return [caption_image(image_path=img, user_prompt=user_prompt) for img in images]
+def _chunked(seq, n):
+    for i in range(0, len(seq), n):
+        yield seq[i:i+n]
 
-def caption_backend_pipeline(images: List[Any], user_prompt: str) -> List[str]:
-    """MOCK backend (intentionally left unimplemented)."""
-    raise NotImplementedError("pipeline backend is a mock. Use --backend pangea for now.")
+def caption_backend_pangea(images: List[Any], user_prompt: str, batch_size: int = 4, lang: str = "") -> List[str]:
+    """
+    Use generation.pangea with visible progress.
+    Prefer true batched path; if it errors, fallback to sequential with progress.
+    """
+    preds: List[str] = []
+    pbar = tqdm(total=len(images), desc=f"Captioning [{lang or 'pangea'}]", unit="img", leave=False)
+    try:
+        # Manually batch so we can update the progress bar as we go
+        for batch in _chunked(images, batch_size):
+            out = caption_images(image_paths=batch, batch_size=batch_size, user_prompt=user_prompt, captioner=captioner)
+            preds.extend(out)
+            pbar.update(len(batch))
+    except Exception:
+        # Fallback: sequential with progress
+        pbar.close()
+        pbar = tqdm(total=len(images), desc=f"Fallback [{lang or 'pangea'}]", unit="img", leave=False)
+        for img in images:
+            preds.append(caption_image(image_path=img, user_prompt=user_prompt, captioner=captioner))
+            pbar.update(1)
+    finally:
+        pbar.close()
+    return preds
+
+def caption_backend_pipeline(images: List[Any], user_prompt: str, lang: str, vs) -> List[str]:
+    """Pipeline-style backend with visible per-image progress."""
+    captions = []
+    pbar = tqdm(total=len(images), desc=f"Captioning [{lang}] (pipeline)", unit="img", leave=False)
+    for img in images:
+        t0=time.perf_counter()
+        retrieved = vs.retrieve(img=img, lang=lang, k=4)
+        t1= time.perf_counter()
+        prompt = user_prompt + " use these captions of similar images as a guidline: " + "\n".join(retrieved)
+        t2= time.perf_counter()
+        print(f"retrieval:{t1-t0}, captioning: {t2-t1}, total:{t2-t0}")
+        captions.append(caption_image(image_path=img, user_prompt=prompt, captioner=captioner))
+        pbar.update(1)
+    pbar.close()
+    return captions
 
 def eval_split(
     lang: str,
@@ -57,13 +93,17 @@ def eval_split(
         user_prompt = f"{user_prompt}\nWrite the caption in {lang_name}."
 
     if backend == "pangea":
-        preds = caption_backend_pangea(images, user_prompt)
+        preds = caption_backend_pangea(images, user_prompt, batch_size=4, lang=lang)
     elif backend == "pipeline":
-        preds = caption_backend_pipeline(images, user_prompt)  # raises NotImplementedError
+        vs = FaissVectorStore('english_coco_index3')
+        preds = caption_backend_pipeline(images, user_prompt, lang=lang, vs=vs)
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
+    # Brief note during scoring (no granularity available inside evaluate_captions)
+    tqdm.write(f"[scoring] {lang} ...")
     metrics = evaluate_captions(refs, preds, lang=lang)
+
     return {
         "lang": lang,
         "n": len(ds),
@@ -74,7 +114,7 @@ def eval_split(
         "prompt_used": user_prompt,
     }
 
-def main():
+def evaluate():
     ap = argparse.ArgumentParser(description="Evaluate Pangea on XM-100 (consistent multilingual metrics).")
     ap.add_argument("--backend", choices=["pangea", "pipeline"], default="pangea",
                     help="Use pangea functions or (mock) HF pipeline.")
@@ -93,8 +133,9 @@ def main():
     langs = LANG_SPLITS if (len(args.langs) == 1 and args.langs[0].lower() == "all") else args.langs
 
     all_rows = []
-    for lang in langs:
-        print(f"\n=== Evaluating split: {lang} ===", flush=True)
+    # Progress over languages
+    for lang in tqdm(langs, desc="Languages", unit="lang"):
+        tqdm.write(f"\n=== Evaluating split: {lang} ===")
         res = eval_split(
             lang=lang,
             base_prompt=args.prompt,
@@ -106,25 +147,24 @@ def main():
         lang_full = LANG_NAME.get(lang, lang)
 
         line = (
-        f"[metrics] {lang} ({lang_full}) backend:{args.backend}: "
-        f"BLEU@4={m.get('BLEU@4', float('nan')):.4f}  "
-        f"ROUGE-L={m.get('ROUGE-L', float('nan')):.4f}  "
-        f"ChrF++={m.get('ChrF++', float('nan')):.4f}  "
-        f"BERT-F1={m.get('bert_F1', float('nan')):.4f}"
-)
+            f"[metrics] {lang} ({lang_full}) backend:{args.backend}: "
+            f"BLEU@4={m.get('BLEU@4', float('nan')):.4f}  "
+            f"ROUGE-L={m.get('ROUGE-L', float('nan')):.4f}  "
+            f"ChrF++={m.get('ChrF++', float('nan')):.4f}  "
+            f"BERT-F1={m.get('bert_F1', float('nan')):.4f}"
+        )
 
         with open("results.txt", "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
         for iid, ref, pred in zip(res["image_ids"], res["references"], res["predictions"]):
             all_rows.append({"lang": lang, "image_id": iid, "reference": ref, "prediction": pred})
         if args.save_csv:
-            csv= lang+args.save_csv
-            pd.DataFrame(all_rows).to_csv(csv, index=False)
-            print(f"[info] wrote CSV to {args.save_csv}")
+            pd.DataFrame(all_rows).to_csv(args.save_csv, index=False)
+            tqdm.write(f"[info] wrote CSV to {args.save_csv}")
 
     if args.save_csv:
         pd.DataFrame(all_rows).to_csv(args.save_csv, index=False)
-        print(f"[info] wrote CSV to {args.save_csv}")
+        tqdm.write(f"[info] wrote CSV to {args.save_csv}")
 
-if __name__ == "__main__":
-    main()
+
