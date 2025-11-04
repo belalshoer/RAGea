@@ -55,33 +55,40 @@ class Captioner:
         
         ps = ensure_llava_patch_size(self.processor, self.model)
         print(f"[info] Using patch_size={ps}")
-        print(f"pad token id: { self.processor.tokenizer.eos_token_id}")
 
     def _build_prompt(
         self,
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        lang: str = None
     ) -> str:
         """
         Build the text template with <image> token expected by many LLaVA-style processors.
         """
-        
-        return (
-            f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-            f"<|im_start|>user\n<image>\n{user_prompt}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-        )
+        if lang:
+            return (
+                f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
+                f"<|im_start|>user\n<image>\n{user_prompt}\nWrite the caption in {lang}.<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+            )
+        else:
+            return (
+                f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
+                f"<|im_start|>user\n<image>\n{user_prompt}<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+            )
 
     def caption_image(
         self,
         image: Union[str, Image.Image],
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        lang: str = None,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
-        temperature: float = 0.1,
+        temperature: float = 0.2,
         top_p: float = 0.9,
-        do_sample: bool = None,
+        do_sample: bool = True,
         **gen_kwargs
 
     ) -> str:
@@ -90,7 +97,7 @@ class Captioner:
         """
 
         img = _load_rgb(image)
-        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt)
+        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)
 
 
         if do_sample is None:
@@ -131,11 +138,12 @@ class Captioner:
         images: Sequence[Union[str, Image.Image]],
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        lang: str = None,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
-        temperature: float = 0,
-        top_p: float = 0.5,
-        do_sample: bool = False,
+        temperature: float = 0.2,
+        top_p: float = 0.9,
+        do_sample: bool = True,
         batch_size: Optional[int] = 16,
         **gen_kwargs
     ) -> List[str]:
@@ -144,14 +152,12 @@ class Captioner:
         Set `batch_size` to process large sets in chunks (avoids OOM).
         Returns a list of captions in the same order as `images`.
         """
-        print("here")
-        print( self.processor.tokenizer.eos_token_id)
         if do_sample is None:
             do_sample = temperature is not None and temperature > 0
 
         # Materialize/normalize inputs to PIL
         pil_images = [_load_rgb(x) for x in images]
-        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt)
+        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)
 
         def _chunks(seq, n = None):
             if n is None or n <= 0:

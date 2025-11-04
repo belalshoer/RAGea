@@ -26,24 +26,24 @@ LANG_NAME = {
 
 captioner = Captioner()
 
-def caption_backend_pangea(images: List[Any], user_prompt: str = None) -> List[str]:
+def caption_backend_pangea(images: List[Any], user_prompt: str = None, lang: str = None) -> List[str]:
     
     try:
         if user_prompt:
-            return captioner.caption_images(images=images, user_prompt=user_prompt)
+            return captioner.caption_images(images=images, user_prompt=user_prompt, lang=lang)
         else:
-            return captioner.caption_images(images=images)
+            return captioner.caption_images(images=images, lang=lang)
     except Exception:
         if user_prompt:
-            return [captioner.caption_image(image=img, user_prompt=user_prompt) for img in tqdm.tqdm(images)]
+            return [captioner.caption_image(image=img, user_prompt=user_prompt, lang=lang) for img in tqdm.tqdm(images)]
         else:
-            return [captioner.caption_image(image=img, user_prompt=user_prompt) for img in tqdm.tqdm(images)]
+            return [captioner.caption_image(image=img, lang=lang) for img in tqdm.tqdm(images)]
 
 
-def eval_split(
+def eval_xm100_split(
     lang: str,
-    user_prompt: str,
-    no_lang_hint: bool,
+    user_prompt: str = None,
+    no_lang_hint: bool = False,
     max_samples: Optional[int] = None,
 ) -> Dict[str, Any]:
     ds = load_dataset("neulab/PangeaBench-xm100", split=lang)
@@ -56,9 +56,9 @@ def eval_split(
 
     if not no_lang_hint:
         lang_name = LANG_NAME.get(lang, lang)
-        user_prompt = f"{user_prompt}\nWrite the caption in {lang_name}."
-
-    preds = caption_backend_pangea(images, user_prompt)
+        preds = caption_backend_pangea(images, user_prompt, lang=lang_name)
+    else:
+        preds = caption_backend_pangea(images, user_prompt)
 
 
     metrics = evaluate_captions(refs, preds, lang=lang)
@@ -72,17 +72,23 @@ def eval_split(
         "prompt_used": user_prompt,
     }
 
-def evaluate_xm100(prompt, langs, max_samples, no_lang_hint, save_csv):
+def evaluate_xm100(
+    prompt: str = None, 
+    langs: List[str] = "all",
+    max_samples: int = None,
+    no_lang_hint: bool = False,
+    results_path: str = "results",
+    with_retrieval: bool = False
+):
 
     langs = LANG_SPLITS if (len(langs) == 1 and langs[0].lower() == "all") else langs
     os.makedirs("outputs", exist_ok=True)
-
-
+    
     all_rows = []
-    for lang in tqdm.tqdm(langs):
+    for lang in langs:
         print(f"\n=== Evaluating split: {lang} ===", flush=True)
 
-        res = eval_split(
+        res = eval_xm100_split(
             lang=lang,
             user_prompt=prompt,
             no_lang_hint=no_lang_hint,
@@ -100,20 +106,15 @@ def evaluate_xm100(prompt, langs, max_samples, no_lang_hint, save_csv):
             f"BERT-F1={m.get('bert_F1', float('nan')):.4f}"
         )
 
-        with open("results.txt", "a", encoding="utf-8") as f:
+        with open(Path("outputs") / f"{results_path}.txt", "a", encoding="utf-8") as f:
             f.write(line + "\n")
         for iid, ref, pred in zip(res["image_ids"], res["references"], res["predictions"]):
             all_rows.append({"lang": lang, "image_id": iid, "reference": ref, "prediction": pred})
 
-        if save_csv:
-            lang_csv_path = Path("outputs") / f"{lang + save_csv}"
-            pd.DataFrame(all_rows).to_csv(lang_csv_path, index=False)
-            print(f"[info] wrote CSV to {lang_csv_path}")
 
-    if save_csv:
-        csv_path = Path("outputs") / f"{save_csv}"
-        pd.DataFrame(all_rows).to_csv(csv_path, index=False)
-        print(f"[info] wrote CSV to {csv_path}")
+    full_path = Path("outputs") / f"{results_path}.csv"
+    pd.DataFrame(all_rows).to_csv(full_path, index=False)
+    print(f"[info] wrote CSV to {full_path}")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Evaluate Pangea on XM-100 (consistent multilingual metrics).")
@@ -125,8 +126,10 @@ if __name__ == "__main__":
                     help="Optional limit per language (<=100).")
     ap.add_argument("--no_lang_hint", action="store_true",
                     help="If set, do not append 'Write the caption in <Language>.' to the prompt.")
-    ap.add_argument("--save_csv", type=str, default=None,
-                    help="Optional path to write CSV of results.")
+    ap.add_argument("--results_path", type=str, default=None,
+                    help="Optional name of the CSV file of results and the text file containing the evaluation metrics.")
 
     args = ap.parse_args()
-    evaluate_xm100(args.prompt, args.langs, args.max_samples, args.no_lang_hint, args.save_csv)
+
+    payload = {k: v for k, v in vars(args).items() if v is not None}
+    evaluate_xm100(**payload)
