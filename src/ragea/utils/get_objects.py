@@ -2,7 +2,8 @@ from ultralytics import YOLO
 from PIL import Image
 model= YOLO("yolo11s.pt")
 
-def get_objects(image: any,min_confidence:float,model=model):
+def get_objects(image: any,min_confidence:float,model=model) -> list[dict[str, object]]:
+    
     """
     Returns a list of detections. Each item has:
       - 'name': class name (str)
