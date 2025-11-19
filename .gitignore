@@ -8,10 +8,9 @@ __pycache__/
 test_images
 
 results.txt
-stores
+*stores
 
-src/ragea/outputs/
-src/ragea/vector_stores/
+*outputs
 *.json
 *.jsonl
 

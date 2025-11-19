@@ -2,8 +2,8 @@ import json
 import tqdm
 from pathlib import Path
 
-def load_coco(input_path: Path, output_path:Path = None):
-    print(f"loading data in  {input_path}")
+def load_coco(input_path: Path, output_path:Path):
+    print(f"loading data in  {input_path}: ")
 
     items = {}
     

@@ -7,7 +7,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from features import Siglip2FeatureExtractor 
 from .base import VectorStore
-from utils import get_similar_captions
 from PIL.Image import Image
 import tqdm
 
@@ -69,6 +68,7 @@ class FaissVectorStore(VectorStore):
     def add_documents(self, chunks: List[Document]) -> int:
         self._load()
 
+        print("Adding documents to vector store..")
         for i in tqdm.tqdm(range(0, len(chunks), self.bs)):
             self.vs.add_documents(chunks[i: i+self.bs]) 
 
@@ -79,11 +79,16 @@ class FaissVectorStore(VectorStore):
     def _save(self) -> None:
         self.vs.save_local(str(self.dir))
 
-    def retrieve(self, img: Image, k: int = None, lang="en") -> List[Document]:
+    def retrieve(self, img: Image, k: int = None, search_type: str = None) -> List[Document]:
         self._load()
         embedding = self.embedding.encode_image([img])
-        docs = self.vs.similarity_search_by_vector(embedding[0], k = (k if k else self.k))
-        img_ids = [d.metadata.get("img_id") for d in docs]
-        captions = get_similar_captions(self.name, img_ids, lang)
-        return captions 
+        docs = self.vs.similarity_search_by_vector(embedding[0], k = (k if k else self.k), search_type=search_type)
+
+        retrieved_data = [{
+            "en_caption": d.page_content,
+            "img_id": d.metadata.get("img_id"),
+            "source": d.metadata.get("source")
+        } for d in docs]
+
+        return retrieved_data 
 

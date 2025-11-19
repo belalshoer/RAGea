@@ -58,46 +58,55 @@ class Captioner:
 
     def _build_prompt(
         self,
+        lang: str,
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        lang: str = None
+        similar_captions: List[str] = None
     ) -> str:
         """
         Build the text template with <image> token expected by many LLaVA-style processors.
         """
-        if lang:
+        if not similar_captions:
             return (
                 f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
                 f"<|im_start|>user\n<image>\n{user_prompt}\nWrite the caption in {lang}.<|im_end|>\n"
                 f"<|im_start|>assistant\n"
             )
         else:
+            similar_captions_concat = "\n".join(similar_captions)
             return (
                 f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-                f"<|im_start|>user\n<image>\n{user_prompt}<|im_end|>\n"
+                f"<|im_start|>user\n<image>\n{user_prompt}\nWrite the caption in {lang}.\n"
+                f"You can find here some examples of captions close to the input image, make sure to mention all objects in the image.\n"
+                f"{similar_captions_concat}"
+                f"<|im_end|>\n"
                 f"<|im_start|>assistant\n"
             )
 
     def caption_image(
         self,
         image: Union[str, Image.Image],
+        lang: str,
+        similar_captions: List[str] = None,
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        lang: str = None,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
         temperature: float = 0.2,
         top_p: float = 0.9,
         do_sample: bool = True,
         **gen_kwargs
-
     ) -> str:
         """
         Single image captioning.
         """
 
         img = _load_rgb(image)
-        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)
+        if similar_captions:
+            text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang, 
+                        similar_captions=similar_captions)
+        else:
+            text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)
 
 
         if do_sample is None:
@@ -117,6 +126,7 @@ class Captioner:
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=do_sample,
+                pad_token_id= self.processor.tokenizer.eos_token_id,
                 use_cache=True,
                 **gen_kwargs
             )
@@ -135,16 +145,17 @@ class Captioner:
 
     def caption_images(
         self,
+        lang: str,
         images: Sequence[Union[str, Image.Image]],
+        similar_captions: Sequence[List[str]] = None,
         user_prompt: str = DEFAULT_USER_PROMPT,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        lang: str = None,
         max_new_tokens: int = 128,
         min_new_tokens: int = 8,
         temperature: float = 0.2,
         top_p: float = 0.9,
         do_sample: bool = True,
-        batch_size: Optional[int] = 16,
+        batch_size: Optional[int] = 4,
         **gen_kwargs
     ) -> List[str]:
         """
@@ -155,9 +166,11 @@ class Captioner:
         if do_sample is None:
             do_sample = temperature is not None and temperature > 0
 
-        # Materialize/normalize inputs to PIL
-        pil_images = [_load_rgb(x) for x in images]
-        text = self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)
+        if similar_captions:
+            pil_images = [(_load_rgb(x), c) for x, c in zip(images, similar_captions)]
+        else:
+            pil_images = [_load_rgb(x) for x in images]
+
 
         def _chunks(seq, n = None):
             if n is None or n <= 0:
@@ -167,17 +180,23 @@ class Captioner:
                     yield seq[i:i+n]
 
         results: List[str] = []
+        num_chunks = 1 if not batch_size or batch_size <= 0 else len(pil_images) // batch_size
         with torch.inference_mode():
-            for chunk in tqdm.tqdm(_chunks(pil_images, batch_size)):
-                # Repeat the same prompt for each image in the chunk
-                texts = [text] * len(chunk)
+            for chunk in tqdm.tqdm(_chunks(pil_images, batch_size), total=num_chunks):
+                if similar_captions:
+                    chunk_images = [c[0] for c in chunk]
+                    chunk_captions = [c[1] for c in chunk]
 
+                    texts = [self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang, similar_captions=similar_captions) for similar_captions in chunk_captions]
+                else:
+                    chunk_images = chunk
+                    texts = [self._build_prompt(user_prompt=user_prompt, system_prompt=system_prompt, lang=lang)] * len(chunk)
+                
                 inputs = self.processor(
-                    images=chunk,
+                    images=chunk_images,
                     text=texts,
                     return_tensors="pt",
                     padding=True,
-
                 ).to(self.device)
 
                 output_ids = self.model.generate(
@@ -199,12 +218,11 @@ class Captioner:
                     clean_up_tokenization_spaces=False
                 )
 
-                # Clean up echoes and extra chatter, one-by-one
-                for full in decoded:
+            # Clean echoes using the *matching* prompt
+                for full, prompt in zip(decoded, texts):
                     s = full.strip()
-                    if s.startswith(text):
-                        s = s[len(text):].strip()
+                    if s.startswith(prompt):
+                        s = s[len(prompt):].strip()
                     s = s.splitlines()[-1].strip() if "\n" in s else s
                     results.append(s)
-
         return results

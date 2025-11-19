@@ -5,7 +5,7 @@ import tqdm
 from pathlib import Path
 
 def prepare_documents(input_path: Path, source: str) -> List[Document]:
-    print(f"Preparing documents for Vector Store")
+    print(f"Preparing documents for Vector Store: ")
     docs = []
 
     with open(input_path, encoding = "UTF-8") as f:

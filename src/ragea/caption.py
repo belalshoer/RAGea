@@ -25,7 +25,6 @@ def caption(path, prompt, count):
 
     captioner = Captioner()
 
-    # File case
     if os.path.isfile(target):
         if not is_image_file(target):
             print(f"[error] Not a supported image file: {target}", file=sys.stderr)
@@ -37,7 +36,6 @@ def caption(path, prompt, count):
         print(f"{target}\t{caption}")
         return
 
-    # Directory case
     if os.path.isdir(target):
         images = list_images_in_dir(target)
         if not images:
@@ -62,7 +60,7 @@ def caption(path, prompt, count):
     })
 
     os.makedirs("outputs", exist_ok=True)
-
+    
     df.to_csv("outputs/captions.csv", index=False)
 
 
