@@ -44,7 +44,7 @@ python evaluate_xm100.py \
 
 --run_name – experiment name; outputs go to outputs/experiments/<run_name>/
 
-###Conclusion
+### Conclusion
 
 RAGea shows that a simple, training-free RAG setup—offline indexing with FAISS and inference-time retrieval—can reliably improve multilingual captioning quality, particularly for low-resource languages, without harming performance in high-resource ones. The object-aware YOLO variant further strengthens grounding in complex scenes by enriching prompts with region-level captions. Future work includes scaling the datastore to larger, more diverse benchmarks and extending this retrieval-augmented design to other multimodal tasks such as VQA and multimodal reasoning.
 
