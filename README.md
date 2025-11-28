@@ -1,8 +1,9 @@
 # RAGea
-![](assets/pipeline.png)
-# RAGea
+
 
 RAGea is a retrieval-augmented multilingual image captioning pipeline built on top of the Pangea-7B vision–language model. We build a FAISS datastore from COCO-35L using SigLIP-2 embeddings and, at inference time, retrieve the top-K similar captions to use as in-context examples for the model. To better handle complex scenes, we also explore an object-aware variant that uses YOLO to retrieve captions for detected regions. We evaluate our model on the XM-100 benchmark and find modest but consistent gains over zero-shot captioning, especially for low-resource languages, while maintaining comparable performance in high-resource languages. 
+
+![](assets/pipeline.png)
 
 ### Installation
 
